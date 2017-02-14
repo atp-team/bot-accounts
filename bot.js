@@ -18,7 +18,7 @@ function create(connector) {
 
     var bot = new builder.UniversalBot(connector, [    
         function (session) {                        
-            session.beginDialog('authDialog');
+            session.beginDialog('authorizeDialog');
         }
     ]);
 
