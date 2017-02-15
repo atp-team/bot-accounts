@@ -10,42 +10,32 @@ var HOSTNAME = process.env.WEBSITE_HOSTNAME ? ("https://" + process.env.WEBSITE_
 var authCallbackUrlCode = 'https://api.csas.cz/sandbox/widp/oauth2/auth?redirect_uri='+HOSTNAME+'/authCallbackServer&client_id=WebExpoClient&response_type=code';
 var authCodeUrl = 'https://api.csas.cz/sandbox/widp/oauth2/auth';
 
+var telemetryModule = require('./telemetry-module.js');
+
+var appInsights = require('applicationinsights');
+appInsights.setup(process.env.APPINSIGHTS_INSTRUMENTATIONKEY).start();
+var appInsightsClient = appInsights.getClient();
+
 function create(connector) {
     
     //=========================================================
     // Bot Setup
     //=========================================================
 
-    var bot = new builder.UniversalBot(connector, [    
-        function (session) {                        
-            session.beginDialog('authorizeDialog');
-        }
-    ]);
+    var bot = new builder.UniversalBot(connector);
 
     bot.on('contactRelationUpdate', function (message) {
-        if (message.action === 'add') {
-            var name = message.user ? message.user.name : null;
-            var reply = new builder.Message()
-                    .address(message.address)
-                    .text("Hello %s...  I'm a CSAS bank bot.", name || 'there');
-            bot.send(reply);
-            bot.beginDialog(message.address, "authorizeDialog")
-        } else {
-            // delete their data
-        }
+        // for webchat
+        // if (message.action === 'add') {            
+        //     sendGreetings(message, bot);
+        // } else {
+        //     // delete their data
+        // }
     });
     bot.on('conversationUpdate', function (message) {
-        if (message.membersAdded) {
-            var name = message.user ? message.user.name : null;
-            message.membersAdded.forEach(function (identity) {
-                if (identity.id === message.address.bot.id) {
-                    var reply = new builder.Message()
-                        .address(message.address)
-                        .text("Hello %s...  I'm a CSAS bank bot.", name || 'there');
-                    bot.send(reply);
-                    bot.beginDialog(message.address, "authorizeDialog")
-                }
-            });
+        // for skype and emulator
+        if (message.membersAdded) {            
+            sendGreetings(message, bot);
         }
     });
           
@@ -77,32 +67,38 @@ function create(connector) {
     .triggerAction({ matches: /^(home)/i });;
 
     bot.dialog('authorizeDialog', [
-        function (session, nextDialog) { //, next)
-            session.dialogData.nextDialog = nextDialog; 
+        function (session, nextDialog) { //, next)            
             session.userData.accountsPrompt = [];
             session.userData.access_token = "";
             session.userData.accounts = {};
-            var b = new Buffer(JSON.stringify(session.message.address));            
-            var card = createSigninCard(session, authCallbackUrlCode + "&state=" + b.toString('base64'));
-            // attach the card to the reply message
-            var msg = new builder.Message(session).addAttachment(card);
-            session.send(msg);
-               
+            
+            session.userData.nextDialog = nextDialog;
+            
+            var telemetry = telemetryModule.createTelemetry(session);
+            appInsightsClient.trackEvent('authorizeDialog', telemetry);
+
+            sendSignInCard(session);               
         }
     ])
     .reloadAction('showMenu', null, { matches: /^(menu|help|\?)/i });
 
     bot.dialog('selectAccountMenu', [
         function (session) {
+            var telemetry = telemetryModule.createTelemetry(session);
+            appInsightsClient.trackEvent('accounts selected', telemetry);
+
             api.refreshAccounts(session)
-            .then(function(result){
-                    builder.Prompts.choice(session, "Select your account", getAccountsPromt(session));
-                }
-            )        
-            .catch(function(e){
-                console.log("Catch handler " + e)
-                authorize(session, 'selectAccountMenu');
-            });
+                .then(function(result){
+                        builder.Prompts.choice(session, "Select your account", getAccountsPromt(session));
+                    }
+                )        
+                .catch(function(e){
+                    console.log("Catch handler " + e);
+                    var exceptionTelemetry = telemetryModule.createTelemetry(session);
+                    exceptionTelemetry.exception = e.toString();
+                    appInsightsClient.trackException(exceptionTelemetry);
+                    authorize(session, 'selectAccountMenu');
+                });
                     
         },
         function (session, results) {
@@ -119,6 +115,8 @@ function create(connector) {
 
     bot.dialog('accountDialog', [
         function (session) {
+            var telemetry = telemetryModule.createTelemetry(session);
+            appInsightsClient.trackEvent('account selected', telemetry);
             builder.Prompts.choice(session, "What do you want to do? Type 'accounts' to return to account selection or 'home'", "Show balance|Show history");
         },
         function (session, results) {
@@ -140,6 +138,9 @@ function create(connector) {
                         )        
                         .catch(function(e){
                             console.log("Catch handler " + e);
+                            var exceptionTelemetry = telemetryModule.createTelemetry(session);
+                            exceptionTelemetry.exception = e.toString();
+                            appInsightsClient.trackException(exceptionTelemetry);
                             authorize(session, 'accountDialog');
                         });
                     
@@ -159,13 +160,18 @@ function create(connector) {
 
     bot.dialog('selectCardMenu', [
         function (session) {
+            var telemetry = telemetryModule.createTelemetry(session);
+            appInsightsClient.trackEvent('cards selected', telemetry);
             api.refreshCards(session)
             .then(function(result){
                     builder.Prompts.choice(session, "Select your card to show more info", getCardsPromt(session));    
                 }
             )        
             .catch(function(e){
-                console.log("Catch handler " + e)
+                console.log("Catch handler " + e);
+                var exceptionTelemetry = telemetryModule.createTelemetry(session);
+                exceptionTelemetry.exception = e.toString();
+                appInsightsClient.trackException(exceptionTelemetry);
                 authorize(session, 'selectCardMenu');
             });                      
         },
@@ -207,8 +213,33 @@ function getCardsPromt(session)
     session.replaceDialog('authorizeDialog', nextDialog);
 }
 
+
+function sendGreetings(message, bot)
+{
+    var name = message.user ? message.user.name : null;
+    message.membersAdded.forEach(function (identity) {
+        if (identity.id === message.address.bot.id) {            
+            var session = bot.loadSession(message.address, function(error, session){
+                var telemetry = telemetryModule.createTelemetry(session, { where: 'conversationUpdate' });
+                appInsightsClient.trackTrace('start', telemetry);    
+                session.send("Hello %s...  I'm a CSAS bank bot ...", name || 'there');
+                session.userData.nextDialog = "rootMenu";
+                session.replaceDialog('authorizeDialog', 'rootMenu')
+            }); 
+
+        }
+    });
+}
+function sendSignInCard(session){
+    var b = new Buffer(JSON.stringify(session.message.address));            
+    var card = createSigninCard(session, authCallbackUrlCode + "&state=" + b.toString('base64'));
+    // attach the card to the reply message
+    var msg = new builder.Message(session).addAttachment(card);
+    session.send(msg);
+}
+
 function createSigninCard(session, url) {
     return new builder.SigninCard(session)
-        .text('BotFramework Sign-in Card')
+        .text('CSAS Sandbox, please sign-in first')
         .button('Sign-in', url);
 }

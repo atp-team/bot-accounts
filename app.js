@@ -5,6 +5,10 @@ var builder = require('botbuilder');
 var bot = require('./bot');
 var api = require('./api');
 
+var appInsights = require('applicationinsights');
+appInsights.setup(process.env.APPINSIGHTS_INSTRUMENTATIONKEY).start();
+var appInsightsClient = appInsights.getClient();
+
 // Create chat bot
 var connector = new builder.ChatConnector({
     appId: process.env.MICROSOFT_APP_ID,
@@ -20,20 +24,8 @@ server.listen(process.env.port || process.env.PORT || 3978, function () {
 });
 server.use(restify.queryParser());
 server.post('/api/messages', connector.listen());
-server.get('/authCallback', authCallback)
 server.get('/authCallbackServer', authCallbackServer)
-// server.get('/authCode', authCode)
 
-function authCallback(req, res, next) {
-    var body = "<html><body><script>document.write(window.location.hash.split('#')[1].split('&')[0].split('=')[1]);</script></body></html>";
-    res.writeHead(200, {
-    'Content-Length': Buffer.byteLength(body),
-    'Content-Type': 'text/html'
-    });
-    res.write(body);
-    res.end(); 
-    next();
-}
 
 function authCallbackServer(req, res, next) {
     var body = "<html><body>You can close this window and return to bot</body></html>";
@@ -45,12 +37,14 @@ function authCallbackServer(req, res, next) {
             console.log(result);
             var session = chatBot.loadSession(state, function(error, session){
                 session.userData.access_token = JSON.parse(result).access_token;
-                session.send("You are authorized now!");
-                session.replaceDialog('rootMenu');
+                session.send("You are authorized now!");           
+                appInsightsClient.trackEvent('auth success', { nextDialog : session.userData.nextDialog })     
+                session.replaceDialog(session.userData.nextDialog);
             });            
-            chatBot.send(reply);
+            
         }).catch(function(e){
-            console.log("Catch handler " + e);                            
+            console.log("Catch handler " + e);                               
+            appInsightsClient.trackException(e);         
         });
 
     res.writeHead(200, {

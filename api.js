@@ -6,6 +6,10 @@ var CSAS_API_KEY = process.env.CSAS_API_KEY;
 var PORT = process.env.port || process.env.PORT || 3978;
 var HOSTNAME = process.env.WEBSITE_HOSTNAME ? ("https://" + process.env.WEBSITE_HOSTNAME) : ("http://localhost" + ":" + PORT);
 
+var appInsights = require('applicationinsights');
+appInsights.setup(process.env.APPINSIGHTS_INSTRUMENTATIONKEY).start();
+var appInsightsClient = appInsights.getClient();
+
 // api calls
 module.exports = {
   
@@ -22,7 +26,8 @@ module.exports = {
                     'Authorization': session.userData.access_token
                 }}, function (error, response, body) {
                     if(error)
-                    {
+                    {                        
+                        appInsightsClient.trackException(error);         
                         reject(error);
                     }
                     else if(response.statusCode==403)
@@ -51,7 +56,12 @@ module.exports = {
                     'WEB-API-key': CSAS_API_KEY,
                     'Authorization': session.userData.access_token
                 }}, function (error, response, body) {
-                    if(response.statusCode == 403)
+                    if(error)
+                    {
+                        appInsightsClient.trackException(error);         
+                        reject(error);
+                    }
+                    else if(response.statusCode == 403)
                     {                    
                         reject(new Error('unauthorized'));                        
                     }
@@ -78,7 +88,12 @@ module.exports = {
                     'WEB-API-key': CSAS_API_KEY,
                     'Authorization': session.userData.access_token
                 }}, function (error, response, body) {
-                    if(response.statusCode==403)
+                    if(error)
+                    {
+                        appInsightsClient.trackException(error);         
+                        reject(error);
+                    }
+                    else if(response.statusCode==403)
                     {                    
                         reject(new Error('unauthorized'));                        
                     }                
@@ -104,7 +119,12 @@ module.exports = {
                     'WEB-API-key': CSAS_API_KEY,
                     'Authorization': session.userData.access_token
                 }}, function (error, response, body) {
-                    if(response.statusCode == 403)
+                    if(error)
+                    {
+                        appInsightsClient.trackException(error);         
+                        reject(error);
+                    }
+                    else if(response.statusCode == 403)
                     {                    
                         reject(new Error('unauthorized'));
                         return;
@@ -161,7 +181,12 @@ module.exports = {
                     'Content-Type': 'application/x-www-form-urlencoded',
                     'Content-Length': contentLength
                 }}, function (error, response, body) {
-                    if(response.statusCode==403)
+                    if(error)
+                    {                        
+                        appInsightsClient.trackException(error);         
+                        reject(error);
+                    }
+                    else if(response.statusCode==403)
                     {                    
                         reject(new Error('unauthorized'));                        
                     }                
